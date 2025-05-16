@@ -1,0 +1,8 @@
+requests
+beautifulsoup4
+markdownify
+litellm==1.57.8
+python-dotenv
+ipykernel
+playwright
+nest_asyncio
