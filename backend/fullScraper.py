@@ -113,31 +113,15 @@ def extract_emails_from_markdown(url, filename):
 
 from googlesearch import search
 
-import aiohttp
-from bs4 import BeautifulSoup
-
-async def search_scholar_url_async(session, name, university):
-    query = f"{name} {university} google scholar site:scholar.google.com"
-    url = f"https://html.duckduckgo.com/html/?q={query.replace(' ', '+')}"
-
-    try:
-        async with session.get(url, timeout=10) as resp:
-            html = await resp.text()
-            soup = BeautifulSoup(html, 'html.parser')
-            links = soup.find_all("a", href=True)
-            for link in links:
-                href = link['href']
-                if "scholar.google.com/citations?" in href:
-                    return name, href
-    except Exception as e:
-        print(f"❌ Search failed for {name}: {e}")
-    return name, None
-
-async def resolve_scholar_urls(professor_entries, university_name):
-    async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
-        tasks = [search_scholar_url_async(session, name, university_name) for name, _ in professor_entries]
-        results = await asyncio.gather(*tasks)
-        return dict(results)
+def search_google_scholar_url(name, university, max_results=10):
+    query = f"{name} {university} google scholar"
+    print(f"🔍 Searching: {query}")
+    results = list(search(query, num_results=max_results))
+    for url in results:
+        if "scholar.google.com/citations?" in url:
+            print(f"✅ Found Google Scholar profile: {url}")
+            return url
+    return None
 
 import requests
 from bs4 import BeautifulSoup
@@ -227,24 +211,22 @@ def transform_scholar_url(original_url):
     transformed_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}?{new_query}"
     
     return transformed_url
-
-async def get_scholar_markdown(session, name, university, url_og=None):
+def get_scholar_markdown(name, university):
+    url_og = search_google_scholar_url(name, university)
     if not url_og:
-        # fallback search
-        _, url_og = await search_scholar_url_async(session, name, university)
-        if not url_og:
-            return None
+        return None
 
     url = transform_scholar_url(url_og)
     soup = fetch_scholar_profile(url)
     profile_data = parse_scholar_profile(soup)
 
-    # ✅ Only keep if recent publication is from 2023 or later
+    # ✅ Check if most recent paper is from 2023 or later
     years = [pub['year'] for pub in profile_data['publications'] if isinstance(pub['year'], int)]
     if not years or max(years) < 2023:
         return None
 
     return format_as_markdown(profile_data)
+
 import re
 
 def extract_titles(markdown: str) -> str:
@@ -297,34 +279,29 @@ def classify_text(text):
     best_field = max(similarity_scores, key=similarity_scores.get)
     return best_field, similarity_scores
 
-from playwright.async_api import async_playwright
+from playwright.sync_api import sync_playwright
 
-from playwright.async_api import async_playwright
+def fetch_paper_description(paper_url):
+    """Use Playwright to extract paper description from Google Scholar citation page."""
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(paper_url, wait_until="networkidle", timeout=10000)
 
-async def fetch_description_batch(paper_urls):
-    descriptions = {}
+            # Try several possible containers for the description
+            content = page.content()
+            soup = BeautifulSoup(content, "html.parser")
+            desc = soup.find('div', class_='gsh_csp') or soup.find('div', class_='gs_rs') or soup.find('div', class_='gsh_small')
+            browser.close()
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch_persistent_context(user_data_dir="/tmp/playwright-cache", headless=True)
-        page = await browser.new_page()
+            if desc:
+                return desc.text.strip()
+    except Exception as e:
+        print(f"❌ Could not fetch paper description with Playwright: {e}")
+    return "N/A"
 
-        for url in paper_urls:
-            try:
-                await page.goto(url, wait_until="networkidle", timeout=10000)
-                html = await page.content()
-                soup = BeautifulSoup(html, "html.parser")
-                desc = soup.find('div', class_='gsh_csp') or soup.find('div', class_='gs_rs')
-                descriptions[url] = desc.text.strip() if desc else "N/A"
-            except Exception as e:
-                print(f"❌ Failed to fetch {url}: {e}")
-                descriptions[url] = "N/A"
-
-        await browser.close()
-    return descriptions
-
-import asyncio
-
-async def full_scrape_workflow_async(directory_url, university_name):
+def full_scrape_workflow(directory_url, university_name):
     markdown = scrape_markdown_from_url(directory_url)
     chunks = chunk_markdown(markdown)
 
@@ -340,11 +317,9 @@ async def full_scrape_workflow_async(directory_url, university_name):
                         professor_entries.append((name, email))
 
     all_professor_data = []
-    scholar_url_map = await resolve_scholar_urls(professor_entries, university_name)
-
     for name, email in professor_entries:
         try:
-            scholar_url = scholar_url_map.get(name)
+            scholar_url = search_google_scholar_url(name, university_name)
             if not scholar_url:
                 continue
 
@@ -364,9 +339,7 @@ async def full_scrape_workflow_async(directory_url, university_name):
 
             paper_title = valid_paper["title"]
             paper_link = valid_paper["link"]
-
-            # ✅ Async fetch for paper description
-            paper_description = await fetch_description_async(paper_link)
+            paper_description = fetch_paper_description(paper_link)
 
             paper_titles_blob = '. '.join(pub['title'] for pub in profile_data["publications"])
             research_field, _ = classify_text(paper_titles_blob)
@@ -386,9 +359,5 @@ async def full_scrape_workflow_async(directory_url, university_name):
 
     print(f"✅ Done. {len(all_professor_data)} professors written to {filename}")
     return all_professor_data
-
-# Sync wrapper
-def full_scrape_workflow(directory_url, university_name):
-    return asyncio.run(full_scrape_workflow_async(directory_url, university_name))
 
 full_scrape_workflow("https://facultyprofiles.tufts.edu/search?by=text&type=user", "Tufts University")
