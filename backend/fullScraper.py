@@ -17,11 +17,14 @@ from playwright.async_api import async_playwright
 # Patch nested loops for Jupyter compatibility
 nest_asyncio.apply()
 
-# Load API key
-load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-if not GROQ_API_KEY:
-    raise ValueError("Missing GROQ_API_KEY")
+import json
+
+# Load the JSON file
+with open('api.json', 'r') as f:
+    api_keys = json.load(f)
+
+# Access the key
+GROQ_API_KEY = api_keys['GROQ_API_KEY']
 
 litellm.api_key = GROQ_API_KEY
 litellm.provider = "groq"
