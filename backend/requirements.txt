@@ -1,8 +1,33 @@
-requests
+# Core functionality
 beautifulsoup4
-markdownify
-litellm==1.57.8
-python-dotenv
-ipykernel
+requests
 playwright
 nest_asyncio
+markdownify
+python-dotenv
+textwrap3
+
+# Token counting and language model API
+tiktoken
+litellm==1.57.8
+
+# CSV and parsing
+pandas  # optional if you plan to expand CSV handling
+openpyxl  # optional if you expand to Excel
+
+# Google Search
+googlesearch-python
+aiohttp
+
+# LLM-based research classification
+sentence-transformers
+transformers
+scikit-learn
+scipy
+torch  # required by sentence-transformers backend
+
+# Model compatibility
+numpy<2  # avoid NumPy 2.x ufunc issues
+
+# Optional if using Jupyter
+ipykernel
